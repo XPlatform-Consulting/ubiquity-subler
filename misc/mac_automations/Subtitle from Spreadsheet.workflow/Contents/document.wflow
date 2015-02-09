@@ -1,0 +1,390 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AMApplicationBuild</key>
+	<string>346</string>
+	<key>AMApplicationVersion</key>
+	<string>2.3</string>
+	<key>AMDocumentVersion</key>
+	<string>2</string>
+	<key>actions</key>
+	<array>
+		<dict>
+			<key>action</key>
+			<dict>
+				<key>AMAccepts</key>
+				<dict>
+					<key>Container</key>
+					<string>List</string>
+					<key>Optional</key>
+					<true/>
+					<key>Types</key>
+					<array>
+						<string>com.apple.cocoa.string</string>
+					</array>
+				</dict>
+				<key>AMActionVersion</key>
+				<string>2.0.3</string>
+				<key>AMApplication</key>
+				<array>
+					<string>Automator</string>
+				</array>
+				<key>AMParameterProperties</key>
+				<dict>
+					<key>COMMAND_STRING</key>
+					<dict/>
+					<key>CheckedForUserDefaultShell</key>
+					<dict/>
+					<key>inputMethod</key>
+					<dict/>
+					<key>shell</key>
+					<dict/>
+					<key>source</key>
+					<dict/>
+				</dict>
+				<key>AMProvides</key>
+				<dict>
+					<key>Container</key>
+					<string>List</string>
+					<key>Types</key>
+					<array>
+						<string>com.apple.cocoa.string</string>
+					</array>
+				</dict>
+				<key>ActionBundlePath</key>
+				<string>/System/Library/Automator/Run Shell Script.action</string>
+				<key>ActionName</key>
+				<string>Run Shell Script</string>
+				<key>ActionParameters</key>
+				<dict>
+					<key>COMMAND_STRING</key>
+					<string>require 'rubygems'
+#require 'csv'
+
+@log_file_path = '/tmp/subler_automator.log'
+
+def open_log(log_file_path = @log_file_path)
+  `open #{log_file_path}` rescue nil
+end
+
+def write_log(message)
+  log_entry = "#{Time.now} #{message}\n"
+  puts log_entry
+  File.open(@log_file_path, 'a') { |f| f.write(log_entry)}
+end
+
+def write_exception(message = nil, type = 'EXCEPTION', e = $!)
+  write_log("[EXCEPTION#{message ? " #{message}" : ''}]\n\t Message: #{e.message}\n\t Backtrace: #{e.backtrace}")
+  open_log
+end
+
+def write_error(message = nil, type = 'ERROR')
+  write_log("[#{type}] #{message}")
+  open_log
+end
+
+retried = false
+begin
+  require 'spreadsheet'
+rescue LoadError
+  unless retried or `gem list`.match('^spreadsheet \(')
+    retried = true
+    write_log('Attempting to install gem "spreadsheet"')
+    output = `gem install spreadsheet`
+    write_log("Installer returned: '#{output}'")
+    retry
+  end
+  write_exception('LOADING GEM SPREADSHEET')
+  raise
+end
+
+
+def process_file_for_captioning(source_file_path)
+  source_file_dir_path = File.dirname(source_file_path)
+
+  source_file_basename = File.basename(source_file_path, '.*')
+  source_file_extname = File.extname(source_file_path)
+
+  srt_glob = File.join(source_file_dir_path, "#{source_file_basename}_*.srt")
+
+  srt_file_paths = Dir.glob(srt_glob)
+  srt_file_paths.each do |srt_file_path|
+    srt_file_basename = File.basename(srt_file_path, '.*')
+    srt_file_name_suffix = srt_file_basename.sub(source_file_basename, '')
+
+    #output_file_path = File.join(source_file_dir_path, "#{source_file_basename}#{srt_file_name_suffix}#{source_file_extname}")
+
+    #cmd_line = %(sudo /Applications/MacCaption.app/Contents/MacOS/MacCaption -import=srt -tcmode=29.97df -displaymode=caption -ioptions=A1 -input="#{srt_file_path}" -movie="#{source_file_path}" -export=quicktime708 -output="#{output_file_path}")
+
+    cmd_line = %(/usr/bin/SublerCLI -source "#{srt_file_path}" -language "English" -dest "#{source_file_path}")
+
+    write_log(cmd_line)
+    `#{cmd_line}`
+  end
+end
+
+def create_srt_from_csv(csv_file_path, srt_file_path)
+  #csv_file = CSV.read(csv_file_path, { :encoding =&gt; 'UTF-8', :row_sep =&gt; "\n", :col_sep =&gt; ',' })
+  #csv_file = CSV.open(csv_file_path, 'r')
+  srt_file = File.open(srt_file_path, 'w:UTF-8')
+
+  write_log("Generating '#{srt_file_path}' from '#{csv_file_path}'")
+
+  row_number = 0
+  row_leader = nil
+
+  # csv_file = CSV.read(csv_file_path)
+  # csv_file = csv_file.to_a
+
+  #csv_file.each do |row|
+  CSV.open(csv_file_path, 'r', ',', "\n") do |row|
+    puts "ROW: #{row}"
+    row_number += 1
+    time_in, time_out, text = row
+    srt_file.write("#{row_leader}#{row_number}\n#{time_in} --&gt; #{time_out}\n#{text and !text.empty? ? "#{text}\n" : ''}")
+    row_leader ||= "\n\n" # We need an extra CR between rows after the first row but not at the end of the file
+  end
+end
+
+def create_srt_from_spreadsheet(spreadsheet, srt_file_path)
+  ss = spreadsheet
+
+  srt_file = File.open(srt_file_path, 'w:UTF-8')
+
+  row_number = -1
+  row_leader = nil
+
+  ss.each do |row|
+    row_number += 1
+    next if row_number == 0
+    #puts "ROW: #{row.inspect}"
+    time_in, time_out, reference, text = row
+    next unless time_in and time_out
+
+    srt_file.write("#{row_leader}#{row_number}\n#{time_in} --&gt; #{time_out}\n#{text}")
+    row_leader ||= "\n\n" # We need an extra CR between rows after the first row
+  end
+  srt_file.close
+end
+
+def add_caption_to_file(srt_file_path, video_file_path, language)
+  cmd_line = %(/usr/bin/SublerCLI -source "#{srt_file_path}" -language "#{language}" -dest "#{video_file_path}")
+
+  write_log("Executing: '#{cmd_line}'")
+  `#{cmd_line}`
+end
+
+def process_csv_caption_file(csv_file_path)
+  csv_file_dir_path = File.dirname(csv_file_path)
+  csv_file_basename = File.basename(csv_file_path, '.*')
+  language = csv_file_basename.split('_').last
+
+  language = language.capitalize
+
+  srt_file_name = "#{csv_file_basename}.srt"
+  srt_file_path = File.join(csv_file_dir_path, srt_file_name)
+
+  create_srt_from_csv(csv_file_path, srt_file_path)
+
+  video_file_basename = csv_file_basename.sub("_#{language}", '')
+  video_file_name = "#{video_file_basename}.m4v"
+  video_file_path = File.join(csv_file_dir_path, video_file_name)
+  unless File.exists?(video_file_path)
+    video_file_path.sub!(/\.m4v$/, '.mp4')
+    unless File.exists?(video_file_path)
+      write_log(%([ERROR] Unable to locate video file. "#{video_file_path}"))
+      return
+    end
+  end
+
+  add_caption_to_file(srt_file_path, video_file_path, language)
+end
+
+def process_spreadsheet_caption_file(caption_file_path)
+  caption_file_dir_path = File.dirname(caption_file_path)
+  caption_file_basename = File.basename(caption_file_path, '.*')
+
+  video_file_basename = caption_file_basename
+  video_file_name = "#{video_file_basename}.m4v"
+  video_file_path = File.join(caption_file_dir_path, video_file_name)
+  unless File.exists?(video_file_path)
+    video_file_path.sub!(/\.m4v$/, '.mp4')
+    unless File.exists?(video_file_path)
+      write_log(%([ERROR] Unable to locate video file. "#{video_file_path}"))
+      `open #{@log_file_path}`
+      return
+    end
+  end
+
+  wb = Spreadsheet.open(caption_file_path)
+  wb.worksheets.each do |ws|
+    language = ws.name
+
+    srt_file_name = "#{caption_file_basename}_#{language}.srt"
+    srt_file_path = File.join(caption_file_dir_path, srt_file_name)
+
+    create_srt_from_spreadsheet(ws, srt_file_path)
+
+    add_caption_to_file(srt_file_path, video_file_path, language.capitalize)
+  end
+
+rescue =&gt; e
+  write_exception
+  raise
+end
+
+write_log("Paths to Process: #{ARGV.inspect}")
+
+ARGV.uniq.each do |file_path|
+  # if File.directory?(file_path)
+  #   Dir.glob(File.join(file_path, '**/*.*')).each { |fp| post_file_to_workflow(fp) }
+  # else
+  #   post_file_to_workflow(file_path)
+  # end
+  #process_file_for_captioning(file_path)
+  #process_csv_caption_file(file_path)
+  process_spreadsheet_caption_file(file_path)
+end
+</string>
+					<key>CheckedForUserDefaultShell</key>
+					<true/>
+					<key>inputMethod</key>
+					<integer>1</integer>
+					<key>shell</key>
+					<string>/usr/bin/ruby</string>
+					<key>source</key>
+					<string></string>
+				</dict>
+				<key>BundleIdentifier</key>
+				<string>com.apple.RunShellScript</string>
+				<key>CFBundleVersion</key>
+				<string>2.0.3</string>
+				<key>CanShowSelectedItemsWhenRun</key>
+				<false/>
+				<key>CanShowWhenRun</key>
+				<true/>
+				<key>Category</key>
+				<array>
+					<string>AMCategoryUtilities</string>
+				</array>
+				<key>Class Name</key>
+				<string>RunShellScriptAction</string>
+				<key>InputUUID</key>
+				<string>C844928A-CF5A-44E5-B1C1-061F8490F513</string>
+				<key>Keywords</key>
+				<array>
+					<string>Shell</string>
+					<string>Script</string>
+					<string>Command</string>
+					<string>Run</string>
+					<string>Unix</string>
+				</array>
+				<key>OutputUUID</key>
+				<string>20032FFB-6D33-41D9-84F5-8A8E2EB8531D</string>
+				<key>ShowWhenRun</key>
+				<false/>
+				<key>UUID</key>
+				<string>A86CEE4A-E37B-4563-822A-A3E7D75BDB70</string>
+				<key>UnlocalizedApplications</key>
+				<array>
+					<string>Automator</string>
+				</array>
+				<key>arguments</key>
+				<dict>
+					<key>0</key>
+					<dict>
+						<key>default value</key>
+						<integer>0</integer>
+						<key>name</key>
+						<string>inputMethod</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>0</string>
+					</dict>
+					<key>1</key>
+					<dict>
+						<key>default value</key>
+						<string></string>
+						<key>name</key>
+						<string>source</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>1</string>
+					</dict>
+					<key>2</key>
+					<dict>
+						<key>default value</key>
+						<false/>
+						<key>name</key>
+						<string>CheckedForUserDefaultShell</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>2</string>
+					</dict>
+					<key>3</key>
+					<dict>
+						<key>default value</key>
+						<string></string>
+						<key>name</key>
+						<string>COMMAND_STRING</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>3</string>
+					</dict>
+					<key>4</key>
+					<dict>
+						<key>default value</key>
+						<string>/bin/sh</string>
+						<key>name</key>
+						<string>shell</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>4</string>
+					</dict>
+				</dict>
+				<key>isViewVisible</key>
+				<true/>
+				<key>location</key>
+				<string>762.000000:915.000000</string>
+				<key>nibPath</key>
+				<string>/System/Library/Automator/Run Shell Script.action/Contents/Resources/English.lproj/main.nib</string>
+			</dict>
+			<key>isViewVisible</key>
+			<true/>
+		</dict>
+	</array>
+	<key>connectors</key>
+	<dict/>
+	<key>workflowMetaData</key>
+	<dict>
+		<key>serviceApplicationBundleID</key>
+		<string>com.apple.finder</string>
+		<key>serviceApplicationPath</key>
+		<string>/System/Library/CoreServices/Finder.app</string>
+		<key>serviceInputTypeIdentifier</key>
+		<string>com.apple.Automator.fileSystemObject</string>
+		<key>serviceOutputTypeIdentifier</key>
+		<string>com.apple.Automator.nothing</string>
+		<key>serviceProcessesInput</key>
+		<integer>0</integer>
+		<key>workflowTypeIdentifier</key>
+		<string>com.apple.Automator.servicesMenu</string>
+	</dict>
+</dict>
+</plist>

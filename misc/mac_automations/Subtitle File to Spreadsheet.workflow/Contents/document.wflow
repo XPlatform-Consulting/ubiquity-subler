@@ -1,0 +1,353 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AMApplicationBuild</key>
+	<string>346</string>
+	<key>AMApplicationVersion</key>
+	<string>2.3</string>
+	<key>AMDocumentVersion</key>
+	<string>2</string>
+	<key>actions</key>
+	<array>
+		<dict>
+			<key>action</key>
+			<dict>
+				<key>AMAccepts</key>
+				<dict>
+					<key>Container</key>
+					<string>List</string>
+					<key>Optional</key>
+					<true/>
+					<key>Types</key>
+					<array>
+						<string>com.apple.cocoa.string</string>
+					</array>
+				</dict>
+				<key>AMActionVersion</key>
+				<string>2.0.3</string>
+				<key>AMApplication</key>
+				<array>
+					<string>Automator</string>
+				</array>
+				<key>AMParameterProperties</key>
+				<dict>
+					<key>COMMAND_STRING</key>
+					<dict/>
+					<key>CheckedForUserDefaultShell</key>
+					<dict/>
+					<key>inputMethod</key>
+					<dict/>
+					<key>shell</key>
+					<dict/>
+					<key>source</key>
+					<dict/>
+				</dict>
+				<key>AMProvides</key>
+				<dict>
+					<key>Container</key>
+					<string>List</string>
+					<key>Types</key>
+					<array>
+						<string>com.apple.cocoa.string</string>
+					</array>
+				</dict>
+				<key>ActionBundlePath</key>
+				<string>/System/Library/Automator/Run Shell Script.action</string>
+				<key>ActionName</key>
+				<string>Run Shell Script</string>
+				<key>ActionParameters</key>
+				<dict>
+					<key>COMMAND_STRING</key>
+					<string>require 'rubygems'
+
+@log_file_path = '/tmp/srt_to_excel_automator.log'
+
+def show_log(log_file_path = @log_file_path)
+  `open #{log_file_path}` rescue nil
+end
+
+def write_log(message)
+  log_entry = "#{Time.now} #{message}\n"
+  puts log_entry
+  File.open(@log_file_path, 'a') { |f| f.write(log_entry)}
+end
+
+def log_exception(message = nil, type = 'EXCEPTION', e = $!)
+  write_log("[EXCEPTION#{message ? " #{message}" : ''}]\n\t Message: #{e.message}\n\t Backtrace: #{e.backtrace}")
+  show_log
+end
+
+def log_error(message = nil, type = 'ERROR')
+  write_log("[#{type}] #{message}")
+  show_log
+end
+
+def load_gem(require_name, gem_name = nil)
+  retried = false if retried.nil?
+  gem_name = require_name unless gem_name
+
+  require(require_name)
+rescue LoadError
+  unless retried or `gem list`.match('^#{gem_name} \(')
+    retried = true
+    write_log("Attempting to install gem '#{gem_name}'")
+    output = `gem install #{gem_name}`
+    write_log("Installer returned: '#{output.strip}'")
+    retry
+  end
+  write_log(%(Failed to Load Gem. Try Installing using: "sudo gem install #{gem_name}"))
+  log_exception("LOADING GEM #{gem_name}")
+  raise
+rescue =&gt; e
+  log_exception("LOADING GEM #{gem_name}")
+end
+
+load_gem('spreadsheet')
+load_gem('srt')
+
+write_log("Paths to Process: #{ARGV.inspect}")
+
+module SRT
+  class Parser
+    class &lt;&lt; self
+      def timecode(timecode_string)
+        mres = timecode_string.match(/(?&lt;h&gt;\d+):(?&lt;m&gt;\d+):(?&lt;s&gt;\d+)(?&lt;sep&gt;\,|\.)(?&lt;ms&gt;\d+)/)
+        #mres ? "#{mres["h"].to_i * 3600 + mres["m"].to_i * 60 + mres["s"].to_i}.#{mres["ms"]}".to_f : nil
+        mres ? mres.to_s : nil
+      end
+    end
+  end
+end
+
+def parse_srt(srt_file_path)
+  write_log("Parsing File: #{srt_file_path}")
+  srt_file = SRT::File.parse(File.new(srt_file_path))
+
+  srt_file.lines.map do |line|
+    [ line.start_time, line.end_time, line.text.join("\n") ]
+  end
+end
+
+def generate_spreadsheet_with_update(file_path, data, language)
+  file_exists = File.exists?(file_path)
+  if file_exists
+    write_log("Editing File: #{file_path}")
+    wb = Spreadsheet.open(file_path)
+
+    ws = wb.worksheets.find do |ws|
+      ws.name == language
+    end
+    pp (wb.worksheets.methods - Object.methods).sort
+
+    #pp (ws.methods - Object.methods).sort and return if ws
+    wb.worksheets.delete(ws)
+  else
+    write_log("Creating File: #{file_path}")
+    wb = Spreadsheet::Workbook.new
+  end
+  ws = wb.create_worksheet :name =&gt; language
+
+  row_counter = 0
+  data.each do |_data|
+    ws.row(row_counter).concat(_data)
+    row_counter += 1
+  end
+
+  if file_exists
+    temp_file_path = "#{file_path}.tmp"
+    wb.write(temp_file_path)
+    File.delete(file_path)
+    File.rename(temp_file_path, file_path)
+  else
+    wb.write(file_path)
+  end
+
+end
+
+def generate_spreadsheet(file_path, data, language)
+  if File.exists?(file_path)
+    # write_log("Deleting File: #{file_path}")
+    # File.delete(file_path)
+    new_file_name = "#{File.basename(file_path, '.xls')}.#{Time.now.to_i}.xls"
+    write_log("Renaming file '#{file_path}' -&gt; '#{new_file_name}'")
+    File.rename(file_path, new_file_name)
+  end
+
+  write_log("Creating File: #{file_path}")
+  wb = Spreadsheet::Workbook.new
+  ws = wb.create_worksheet :name =&gt; language
+
+  ws.row(0).concat(['IN', 'OUT', 'Reference', 'Subtitle'])
+
+  row_counter = 1
+
+  data.each do |_data|
+    ws.row(row_counter).concat(_data)
+    row_counter += 1
+  end
+
+  wb.write(file_path)
+end
+
+
+def srt_to_excel_file(srt_file_path)
+  srt_file_dir_path = File.dirname(srt_file_path)
+  srt_file_basename = File.basename(srt_file_path, '.*')
+
+  language = srt_file_basename.split('_').last
+
+  language = language.capitalize
+
+  excel_file_basename = "#{srt_file_basename}.xls"
+  excel_file_path = File.join(srt_file_dir_path, excel_file_basename)
+
+  srt_data = parse_srt(srt_file_path)
+  generate_spreadsheet(excel_file_path, srt_data, language)
+end
+
+ARGV.uniq.each do |file_path|
+  srt_to_excel_file(file_path)
+end
+</string>
+					<key>CheckedForUserDefaultShell</key>
+					<true/>
+					<key>inputMethod</key>
+					<integer>1</integer>
+					<key>shell</key>
+					<string>/usr/bin/ruby</string>
+					<key>source</key>
+					<string></string>
+				</dict>
+				<key>BundleIdentifier</key>
+				<string>com.apple.RunShellScript</string>
+				<key>CFBundleVersion</key>
+				<string>2.0.3</string>
+				<key>CanShowSelectedItemsWhenRun</key>
+				<false/>
+				<key>CanShowWhenRun</key>
+				<true/>
+				<key>Category</key>
+				<array>
+					<string>AMCategoryUtilities</string>
+				</array>
+				<key>Class Name</key>
+				<string>RunShellScriptAction</string>
+				<key>InputUUID</key>
+				<string>C844928A-CF5A-44E5-B1C1-061F8490F513</string>
+				<key>Keywords</key>
+				<array>
+					<string>Shell</string>
+					<string>Script</string>
+					<string>Command</string>
+					<string>Run</string>
+					<string>Unix</string>
+				</array>
+				<key>OutputUUID</key>
+				<string>20032FFB-6D33-41D9-84F5-8A8E2EB8531D</string>
+				<key>ShowWhenRun</key>
+				<false/>
+				<key>UUID</key>
+				<string>A86CEE4A-E37B-4563-822A-A3E7D75BDB70</string>
+				<key>UnlocalizedApplications</key>
+				<array>
+					<string>Automator</string>
+				</array>
+				<key>arguments</key>
+				<dict>
+					<key>0</key>
+					<dict>
+						<key>default value</key>
+						<integer>0</integer>
+						<key>name</key>
+						<string>inputMethod</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>0</string>
+					</dict>
+					<key>1</key>
+					<dict>
+						<key>default value</key>
+						<string></string>
+						<key>name</key>
+						<string>source</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>1</string>
+					</dict>
+					<key>2</key>
+					<dict>
+						<key>default value</key>
+						<false/>
+						<key>name</key>
+						<string>CheckedForUserDefaultShell</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>2</string>
+					</dict>
+					<key>3</key>
+					<dict>
+						<key>default value</key>
+						<string></string>
+						<key>name</key>
+						<string>COMMAND_STRING</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>3</string>
+					</dict>
+					<key>4</key>
+					<dict>
+						<key>default value</key>
+						<string>/bin/sh</string>
+						<key>name</key>
+						<string>shell</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>4</string>
+					</dict>
+				</dict>
+				<key>isViewVisible</key>
+				<true/>
+				<key>location</key>
+				<string>769.500000:811.000000</string>
+				<key>nibPath</key>
+				<string>/System/Library/Automator/Run Shell Script.action/Contents/Resources/English.lproj/main.nib</string>
+			</dict>
+			<key>isViewVisible</key>
+			<true/>
+		</dict>
+	</array>
+	<key>connectors</key>
+	<dict/>
+	<key>workflowMetaData</key>
+	<dict>
+		<key>serviceApplicationBundleID</key>
+		<string>com.apple.finder</string>
+		<key>serviceApplicationPath</key>
+		<string>/System/Library/CoreServices/Finder.app</string>
+		<key>serviceInputTypeIdentifier</key>
+		<string>com.apple.Automator.fileSystemObject</string>
+		<key>serviceOutputTypeIdentifier</key>
+		<string>com.apple.Automator.nothing</string>
+		<key>serviceProcessesInput</key>
+		<integer>0</integer>
+		<key>workflowTypeIdentifier</key>
+		<string>com.apple.Automator.servicesMenu</string>
+	</dict>
+</dict>
+</plist>
