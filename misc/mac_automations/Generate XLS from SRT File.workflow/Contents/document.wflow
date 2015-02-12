@@ -138,15 +138,12 @@ def generate_spreadsheet_with_update(file_path, data, language)
     ws = wb.worksheets.find do |ws|
       ws.name == language
     end
-    pp (wb.worksheets.methods - Object.methods).sort
-
-    #pp (ws.methods - Object.methods).sort and return if ws
     wb.worksheets.delete(ws)
   else
     write_log("Creating File: #{file_path}")
     wb = Spreadsheet::Workbook.new
   end
-  ws = wb.create_worksheet :name =&gt; language
+  ws = wb.create_worksheet(:name =&gt; language)
 
   row_counter = 0
   data.each do |_data|
