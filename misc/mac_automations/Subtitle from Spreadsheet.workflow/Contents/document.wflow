@@ -64,7 +64,7 @@
 
 @log_file_path = '/tmp/subler_automator.log'
 
-def open_log(log_file_path = @log_file_path)
+def show_log(log_file_path = @log_file_path)
   `open #{log_file_path}` rescue nil
 end
 
@@ -76,12 +76,12 @@ end
 
 def write_exception(message = nil, type = 'EXCEPTION', e = $!)
   write_log("[EXCEPTION#{message ? " #{message}" : ''}]\n\t Message: #{e.message}\n\t Backtrace: #{e.backtrace}")
-  open_log
+  show_log
 end
 
 def write_error(message = nil, type = 'ERROR')
   write_log("[#{type}] #{message}")
-  open_log
+  show_log
 end
 
 retried = false
@@ -99,6 +99,7 @@ rescue LoadError
   raise
 end
 
+@subler_cli_path = '/usr/bin/SublerCLI'
 
 def process_file_for_captioning(source_file_path)
   source_file_dir_path = File.dirname(source_file_path)
@@ -117,7 +118,7 @@ def process_file_for_captioning(source_file_path)
 
     #cmd_line = %(sudo /Applications/MacCaption.app/Contents/MacOS/MacCaption -import=srt -tcmode=29.97df -displaymode=caption -ioptions=A1 -input="#{srt_file_path}" -movie="#{source_file_path}" -export=quicktime708 -output="#{output_file_path}")
 
-    cmd_line = %(/usr/bin/SublerCLI -source "#{srt_file_path}" -language "English" -dest "#{source_file_path}")
+    cmd_line = %("#{@subler_cli_path}" -source "#{srt_file_path}" -language "English" -dest "#{source_file_path}")
 
     write_log(cmd_line)
     `#{cmd_line}`
@@ -168,11 +169,15 @@ def create_srt_from_spreadsheet(spreadsheet, srt_file_path)
   srt_file.close
 end
 
-def add_caption_to_file(srt_file_path, video_file_path, language)
-  cmd_line = %(/usr/bin/SublerCLI -source "#{srt_file_path}" -language "#{language}" -dest "#{video_file_path}")
-
+def execute_command(cmd_line)
   write_log("Executing: '#{cmd_line}'")
   `#{cmd_line}`
+end
+
+def add_caption_to_file(srt_file_path, video_file_path, language)
+  cmd_line = %("#{@subler_cli_path}" -source "#{srt_file_path}" -language "#{language}" -dest "#{video_file_path}")
+
+  execute_command(cmd_line)
 end
 
 def process_csv_caption_file(csv_file_path)
@@ -211,11 +216,13 @@ def process_spreadsheet_caption_file(caption_file_path)
   unless File.exists?(video_file_path)
     video_file_path.sub!(/\.m4v$/, '.mp4')
     unless File.exists?(video_file_path)
-      write_log(%([ERROR] Unable to locate video file. "#{video_file_path}"))
-      `open #{@log_file_path}`
+      write_error(%(Unable to locate video file. "#{video_file_path}"))
       return
     end
   end
+
+  cmd_line = %("#{@subler_cli_path}" -dest "#{video_file_path}" -remove)
+  execute_command(cmd_line)
 
   wb = Spreadsheet.open(caption_file_path)
   wb.worksheets.each do |ws|
@@ -361,7 +368,7 @@ end
 				<key>isViewVisible</key>
 				<true/>
 				<key>location</key>
-				<string>762.000000:915.000000</string>
+				<string>762.000000:1006.000000</string>
 				<key>nibPath</key>
 				<string>/System/Library/Automator/Run Shell Script.action/Contents/Resources/English.lproj/main.nib</string>
 			</dict>
