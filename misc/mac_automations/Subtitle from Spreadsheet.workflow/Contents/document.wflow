@@ -163,7 +163,7 @@ def create_srt_from_spreadsheet(spreadsheet, srt_file_path)
     time_in, time_out, reference, text = row
     next unless time_in and time_out
 
-    srt_file.write("#{row_leader}#{row_number}\n#{time_in} --&gt; #{time_out}\n#{text}")
+    srt_file.write("#{row_leader}#{row_number}\n#{time_in.strip} --&gt; #{time_out.strip}\n#{text}")
     row_leader ||= "\n\n" # We need an extra CR between rows after the first row
   end
   srt_file.close
