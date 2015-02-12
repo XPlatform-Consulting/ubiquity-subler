@@ -64,7 +64,8 @@
 @log_file_path = '/tmp/srt_to_excel_automator.log'
 
 def show_log(log_file_path = @log_file_path)
-  `open #{log_file_path}` rescue nil
+  `open #{log_file_path}` rescue nil unless @show_log
+  @show_log = true
 end
 
 def write_log(message)
@@ -125,6 +126,7 @@ def parse_srt(srt_file_path)
   srt_file = SRT::File.parse(File.new(srt_file_path))
 
   srt_file.lines.map do |line|
+    log_error(line.inspect) if line.error
     [ line.start_time, line.end_time, line.text.join("\n") ]
   end
 end
