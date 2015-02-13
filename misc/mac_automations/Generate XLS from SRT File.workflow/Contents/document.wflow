@@ -127,7 +127,7 @@ def parse_srt(srt_file_path)
 
   srt_file.lines.map do |line|
     log_error(line.inspect) if line.error
-    [ line.start_time, line.end_time, line.text.join("\n") ]
+    [ line.start_time, line.end_time, nil, line.text.join("\n") ]
   end
 end
 
@@ -175,7 +175,7 @@ def generate_spreadsheet(file_path, data, language)
 
   write_log("Creating File: #{file_path}")
   wb = Spreadsheet::Workbook.new
-  ws = wb.create_worksheet :name =&gt; language
+  ws = wb.create_worksheet(:name =&gt; language)
 
   ws.row(0).concat(['IN', 'OUT', 'Reference', 'Subtitle'])
 
