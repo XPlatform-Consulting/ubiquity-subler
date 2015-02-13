@@ -166,11 +166,11 @@ end
 
 def generate_spreadsheet(file_path, data, language)
   if File.exists?(file_path)
-    # write_log("Deleting File: #{file_path}")
-    # File.delete(file_path)
-    new_file_name = "#{File.basename(file_path, '.xls')}.#{Time.now.to_i}.xls"
-    write_log("Renaming file '#{file_path}' -&gt; '#{new_file_name}'")
-    File.rename(file_path, new_file_name)
+    write_log("Deleting File: #{file_path}")
+    File.delete(file_path)
+    #new_file_name = "#{File.basename(file_path, '.xls')}.#{Time.now.to_i}.xls"
+    #write_log("Renaming file '#{file_path}' -&gt; '#{new_file_name}'")
+    #File.rename(file_path, new_file_name)
   end
 
   write_log("Creating File: #{file_path}")
